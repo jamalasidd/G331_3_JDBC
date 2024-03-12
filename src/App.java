@@ -1,59 +1,210 @@
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.Statement;
 
 public class App {
 
-    public static void main(String[] args){
+    private Connection connection; // Class-level variable to hold the connection
 
-        String serverName = null;
-        String portNumber = null;
-        String databaseName = null;
-        String username = null;
-        String password = null;
+    private JTextField serverNameField, portNumberField, databaseNameField, usernameField;
+    private JPasswordField passwordField;
+    private JFrame loginFrame, commandFrame;
+    private JTextArea sqlCommandsArea, resultsArea;
 
-        try (InputStreamReader in = new InputStreamReader(System.in); BufferedReader br = new BufferedReader(in)) {
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            new App().createAndShowLoginGUI();
+        });
+    }
 
-            // Prompt the user for server details
-            System.out.print("Enter server name: ");
-            serverName = br.readLine();
-            System.out.print("Enter port number: ");
-            portNumber = br.readLine();
-            System.out.print("Enter database name: ");
-            databaseName = br.readLine();
-            System.out.print("Enter username: ");
-            username = br.readLine();
-            System.out.print("Enter password: ");
-            password = br.readLine();
+    private void createAndShowLoginGUI() {
+        loginFrame = new JFrame("Database Login");
+        loginFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        loginFrame.setSize(400, 300);
 
-            // Create a variable for the connection string.
-            String connectionUrl = "jdbc:sqlserver://" + serverName + ":" + portNumber + ";" + "databaseName="
-                    + databaseName + ";username=" + username + ";password=" + password + ";"+ "encrypt=true;trustServerCertificate=true";
+        JPanel panel = new JPanel();
+        panel.setLayout(new GridLayout(6, 2));
 
-            // Establish the connection.
-            try (Connection con = DriverManager.getConnection(connectionUrl); Statement stmt = con.createStatement()) {
+        panel.add(new JLabel("Server Name:"));
+        serverNameField = new JTextField();
+        panel.add(serverNameField);
 
-                System.out.println();
-                System.out.println("Connection established successfully.");
+        panel.add(new JLabel("Port Number:"));
+        portNumberField = new JTextField();
+        panel.add(portNumberField);
 
-                // Create and execute an SQL statement that returns user name.
-                String SQL = "SELECT * FROM Northwinds2022TSQLV7.Sales.Customer";
-                try (ResultSet rs = stmt.executeQuery(SQL)) {
+        panel.add(new JLabel("Database Name:"));
+        databaseNameField = new JTextField();
+        panel.add(databaseNameField);
 
-                    // Iterate through the data in the result set and display it.
-                    while (rs.next()) {
-                        System.out.println(rs.getString(3));
+        panel.add(new JLabel("Username:"));
+        usernameField = new JTextField();
+        panel.add(usernameField);
+
+        panel.add(new JLabel("Password:"));
+        passwordField = new JPasswordField();
+        panel.add(passwordField);
+
+        JButton loginButton = new JButton("Login");
+        loginButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                attemptLogin();
+            }
+        });
+        panel.add(loginButton);
+
+        loginFrame.getContentPane().add(BorderLayout.CENTER, panel);
+        loginFrame.setVisible(true);
+    }
+
+    private void attemptLogin() {
+        String serverName = serverNameField.getText();
+        String portNumber = portNumberField.getText();
+        String databaseName = databaseNameField.getText();
+        String username = usernameField.getText();
+        char[] passwordChars = passwordField.getPassword();
+        String password = new String(passwordChars);
+
+        String connectionUrl = "jdbc:sqlserver://" + serverName + ":" + portNumber + ";" + "databaseName="
+                + databaseName + ";username=" + username + ";password=" + password + ";encrypt=true;trustServerCertificate=true";
+
+        try {
+            connection = DriverManager.getConnection(connectionUrl);
+            // If the connection is successful, show a message and proceed to the next steps
+            JOptionPane.showMessageDialog(loginFrame, "Login successful!", "Success", JOptionPane.INFORMATION_MESSAGE);
+            createAndShowCommandGUI();
+        } catch (Exception ex) {
+            // If an exception occurs, show an error message
+            JOptionPane.showMessageDialog(loginFrame, "Login failed. Please check your credentials and try again.", "Error", JOptionPane.ERROR_MESSAGE);
+            ex.printStackTrace();
+        }
+    }
+
+    private void createAndShowCommandGUI() {
+        commandFrame = new JFrame("Execute SQL Commands");
+        commandFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        commandFrame.setSize(800, 600);
+
+        JPanel panel = new JPanel(new BorderLayout());
+
+        sqlCommandsArea = new JTextArea();
+        JScrollPane commandsScrollPane = new JScrollPane(sqlCommandsArea);
+        panel.add(commandsScrollPane, BorderLayout.WEST);
+
+        resultsArea = new JTextArea();
+        resultsArea.setEditable(false);
+        JScrollPane resultsScrollPane = new JScrollPane(resultsArea);
+        panel.add(resultsScrollPane, BorderLayout.CENTER);
+
+        JButton executeButton = new JButton("Execute SQL Commands");
+        executeButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                executeSQLCommands();
+            }
+        });
+        panel.add(executeButton, BorderLayout.SOUTH);
+
+        JButton selectFileButton = new JButton("Select File");
+        selectFileButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                selectSQLFile();
+            }
+        });
+        panel.add(selectFileButton, BorderLayout.NORTH);
+
+        commandFrame.getContentPane().add(BorderLayout.CENTER, panel);
+        commandFrame.setVisible(true);
+    }
+
+    private void selectSQLFile() {
+        JFileChooser fileChooser = new JFileChooser();
+        int result = fileChooser.showOpenDialog(commandFrame);
+
+        if (result == JFileChooser.APPROVE_OPTION) {
+            File selectedFile = fileChooser.getSelectedFile();
+
+            try (BufferedReader fileReader = new BufferedReader(new FileReader(selectedFile))) {
+                StringBuilder fileContents = new StringBuilder();
+                String line;
+                while ((line = fileReader.readLine()) != null) {
+                    fileContents.append(line).append("\n");
+                }
+                sqlCommandsArea.setText(fileContents.toString());
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(commandFrame, "Error reading SQL file.", "Error", JOptionPane.ERROR_MESSAGE);
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void executeSQLCommands() {
+        try (Statement stmt = connection.createStatement()) {
+            String sqlCommands = sqlCommandsArea.getText();
+
+            // Split SQL commands by semicolon
+            String[] commands = sqlCommands.split(";");
+
+            for (String command : commands) {
+                // Trim leading and trailing whitespaces
+                command = command.trim();
+
+                // Skip empty commands
+                if (command.isEmpty()) {
+                    continue;
+                }
+
+                // Display the SQL command in the GUI
+                resultsArea.append("Executing: " + command + "\n");
+
+                // Execute the SQL command
+                boolean hasResults = stmt.execute(command);
+
+                // Display results if there are any
+                if (hasResults) {
+                    try (ResultSet rs = stmt.getResultSet()) {
+                        // Convert ResultSet to 2D Object array for JTable
+                        ResultSetMetaData metaData = rs.getMetaData();
+                        int columnCount = metaData.getColumnCount();
+                        Object[][] data = new Object[100][columnCount];
+                        int rowCount = 0;
+                        while (rs.next()) {
+                            Object[] row = new Object[columnCount];
+                            for (int i = 0; i < columnCount; i++) {
+                                row[i] = rs.getObject(i + 1);
+                            }
+                            data[rowCount++] = row;
+                        }
+
+                        // Create JTable with the data
+                        String[] columnNames = new String[columnCount];
+                        for (int i = 0; i < columnCount; i++) {
+                            columnNames[i] = metaData.getColumnLabel(i + 1);
+                        }
+                        JTable table = new JTable(data, columnNames);
+
+                        // Display the table in a scroll pane
+                        JScrollPane scrollPane = new JScrollPane(table);
+                        JOptionPane.showMessageDialog(commandFrame, scrollPane, "Results", JOptionPane.PLAIN_MESSAGE);
                     }
                 }
             }
-        }
-
-        // Handle any errors that may have occurred.
-        catch (Exception e) {
-            e.printStackTrace();
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(commandFrame, "Error executing SQL commands.", "Error", JOptionPane.ERROR_MESSAGE);
+            ex.printStackTrace();
         }
     }
 }
